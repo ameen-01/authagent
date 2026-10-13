@@ -1,0 +1,20 @@
+# Core (always needed)
+numpy>=1.26
+openai>=1.40
+python-dotenv>=1.0
+
+# ML: dense retrieval, NLI baseline, verifier fine-tuning (torch is preinstalled on Colab/Kaggle)
+torch>=2.2
+transformers>=4.44
+sentence-transformers>=3.0
+sentencepiece>=0.2
+protobuf>=4.25
+
+# Demo and API
+gradio>=4.40
+fastapi>=0.110
+uvicorn>=0.29
+pydantic>=2.6
+
+# Tests
+pytest>=8.0

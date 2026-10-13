@@ -1,0 +1,38 @@
+{
+  "policy_id": "POL-RA",
+  "title": "Biologic DMARD for rheumatoid arthritis (e.g., adalimumab)",
+  "drug_class": "TNF inhibitor",
+  "note": "Synthetic, simplified policy for research use. Modeled on common criteria patterns; not any real insurer's policy and not clinical guidance.",
+  "criteria": [
+    {
+      "id": "C1",
+      "text": "Patient has a diagnosis of rheumatoid arthritis.",
+      "kind": "diagnosis",
+      "params": {"code_prefixes": ["M05", "M06"], "condition": "rheumatoid arthritis"}
+    },
+    {
+      "id": "C2",
+      "text": "Patient is 18 years of age or older.",
+      "kind": "age",
+      "params": {"min_age": 18}
+    },
+    {
+      "id": "C3",
+      "text": "Patient has tried methotrexate for at least 90 days.",
+      "kind": "med_duration",
+      "params": {"drugs": ["methotrexate"], "min_days": 90}
+    },
+    {
+      "id": "C4",
+      "text": "Inadequate response to, or intolerance of, methotrexate is documented.",
+      "kind": "documentation",
+      "params": {}
+    },
+    {
+      "id": "C5",
+      "text": "A negative tuberculosis screening test is on file within the last 12 months.",
+      "kind": "lab",
+      "params": {"labs": ["QuantiFERON-TB Gold", "Tuberculin skin test"], "expected": "negative", "max_age_days": 365}
+    }
+  ]
+}

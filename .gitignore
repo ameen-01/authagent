@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+models/
+results/traces/
+*.egg-info/
+.ipynb_checkpoints/
+# cache/llm_cache.jsonl is committed on purpose: it makes runs reproducible offline.

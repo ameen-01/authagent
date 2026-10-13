@@ -1,0 +1,38 @@
+{
+  "policy_id": "POL-PCSK9",
+  "title": "PCSK9 inhibitor for hyperlipidemia (e.g., evolocumab)",
+  "drug_class": "PCSK9 inhibitor",
+  "note": "Synthetic, simplified policy for research use. Modeled on common criteria patterns; not any real insurer's policy and not clinical guidance. Held out from verifier training to test generalization.",
+  "criteria": [
+    {
+      "id": "C1",
+      "text": "Patient has a diagnosis of atherosclerotic cardiovascular disease or heterozygous familial hypercholesterolemia.",
+      "kind": "diagnosis",
+      "params": {"code_prefixes": ["I25", "E78.01"], "condition": "atherosclerotic cardiovascular disease or heterozygous familial hypercholesterolemia"}
+    },
+    {
+      "id": "C2",
+      "text": "Patient is 18 years of age or older.",
+      "kind": "age",
+      "params": {"min_age": 18}
+    },
+    {
+      "id": "C3",
+      "text": "Most recent LDL-C is 70 mg/dL or higher, measured within the last 120 days.",
+      "kind": "lab",
+      "params": {"labs": ["LDL-C"], "op": ">=", "threshold": 70, "unit": "mg/dL", "max_age_days": 120}
+    },
+    {
+      "id": "C4",
+      "text": "Patient has tried a high-intensity statin (atorvastatin or rosuvastatin) for at least 90 days.",
+      "kind": "med_duration",
+      "params": {"drugs": ["atorvastatin", "rosuvastatin"], "min_days": 90}
+    },
+    {
+      "id": "C5",
+      "text": "Adherence to statin therapy is documented.",
+      "kind": "documentation",
+      "params": {}
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "policy_id": "POL-GLP1",
+  "title": "GLP-1 receptor agonist for type 2 diabetes (e.g., semaglutide)",
+  "drug_class": "GLP-1 receptor agonist",
+  "note": "Synthetic, simplified policy for research use. Modeled on common criteria patterns; not any real insurer's policy and not clinical guidance.",
+  "criteria": [
+    {
+      "id": "C1",
+      "text": "Patient has a diagnosis of type 2 diabetes mellitus.",
+      "kind": "diagnosis",
+      "params": {"code_prefixes": ["E11"], "condition": "type 2 diabetes mellitus"}
+    },
+    {
+      "id": "C2",
+      "text": "Patient is 18 years of age or older.",
+      "kind": "age",
+      "params": {"min_age": 18}
+    },
+    {
+      "id": "C3",
+      "text": "Most recent HbA1c is 7.0% or higher, measured within the last 90 days.",
+      "kind": "lab",
+      "params": {"labs": ["HbA1c"], "op": ">=", "threshold": 7.0, "unit": "%", "max_age_days": 90}
+    },
+    {
+      "id": "C4",
+      "text": "Patient has tried metformin for at least 90 days.",
+      "kind": "med_duration",
+      "params": {"drugs": ["metformin"], "min_days": 90}
+    },
+    {
+      "id": "C5",
+      "text": "Absence of personal or family history of medullary thyroid carcinoma is documented.",
+      "kind": "documentation",
+      "params": {}
+    }
+  ]
+}
