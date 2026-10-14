@@ -57,7 +57,8 @@ def reliability(probs: np.ndarray, y: np.ndarray, bins: int = 10) -> list[dict]:
 def risk_coverage(probs: np.ndarray, y: np.ndarray) -> list[dict]:
     conf, pred = probs.max(axis=1), probs.argmax(axis=1)
     out = []
-    for tau in np.round(np.arange(0.30, 1.0, 0.025), 3):
+    grid = np.concatenate([np.arange(0.30, 0.95, 0.025), [0.95, 0.96, 0.97, 0.98, 0.99, 0.995]])
+    for tau in np.round(grid, 3):
         m = conf >= tau
         cov = float(m.mean())
         risk = float((pred[m] != y[m]).mean()) if m.any() else 0.0
