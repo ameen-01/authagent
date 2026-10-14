@@ -83,7 +83,7 @@ def compact(messages: list[dict], base_end: int, work_start: int | None) -> list
 
 def run_agent(chart: dict, policy: dict, llm, verifier, retrieval_mode: str = "hybrid",
               use_rules: bool = True, max_steps: int = 40, max_parse_failures: int = 4,
-              compaction: bool = True) -> dict:
+              compaction: bool = True, max_repeats: int = 5) -> dict:
     env = CaseEnv(chart, policy, verifier, retrieval_mode=retrieval_mode, use_rules=use_rules)
     messages = [{"role": "system", "content": system_prompt(use_rules)},
                 {"role": "user", "content": task_message(env.chart, policy)}]
@@ -91,6 +91,7 @@ def run_agent(chart: dict, policy: dict, llm, verifier, retrieval_mode: str = "h
     parse_failures = 0
     stop_reason = "max_steps"
     base_end, work_start = None, None
+    last_signature, repeats = None, 0
     t0 = time.time()
     for step in range(1, max_steps + 1):
         context = compact(messages, base_end, work_start) if (compaction and base_end) else messages
@@ -109,8 +110,17 @@ def run_agent(chart: dict, policy: dict, llm, verifier, retrieval_mode: str = "h
                                                         'one JSON object: {"thought": ..., "tool": ..., "args": {...}}'})
             continue
         obs = env.call(tool, args)
+        signature = json.dumps([tool, args], sort_keys=True)
+        repeats = repeats + 1 if signature == last_signature and "error" in obs else 0
+        last_signature = signature
+        if repeats >= 2:  # third identical failing call in a row: break the loop
+            obs = {**obs, "warning": "You have repeated this exact failing call. Do something different: "
+                                     "read the error and the cited text, or call search_chart."}
         trace.append({"step": step, "thought": action.get("thought", ""), "tool": tool, "args": args,
                       "observation": obs})
+        if repeats >= max_repeats:
+            stop_reason = "stuck"
+            break
         messages.append({"role": "user", "content": "Observation: " + json.dumps(obs, ensure_ascii=False)})
         if tool == "get_checklist" and "criteria" in obs and base_end is None:
             base_end = len(messages)
@@ -120,11 +130,17 @@ def run_agent(chart: dict, policy: dict, llm, verifier, retrieval_mode: str = "h
             stop_reason = "finished"
             break
     outcome = env.outcome()
+    decision = outcome["decision"]
+    draft = env.draft()
+    if stop_reason != "finished":
+        # Ran out of budget or got stuck: never guess; hand the case to a human reviewer.
+        decision = "review"
+        draft = "NEEDS HUMAN REVIEW (agent did not finish: " + stop_reason + ")\n\n" + draft
     return {
         "statuses": outcome["statuses"],
-        "decision": outcome["decision"],
+        "decision": decision,
         "decisions": env.decisions,
-        "draft": env.draft(),
+        "draft": draft,
         "steps": len(trace),
         "parse_failures": parse_failures,
         "stop_reason": stop_reason,

@@ -70,6 +70,7 @@ def case_metrics(rows: list[dict]) -> dict:
         "steps_per_case": float(np.mean([r.get("steps", 0) for r in ok_rows])),
         "parse_failures": int(sum(r.get("parse_failures", 0) for r in ok_rows)),
         "unfinished": int(sum(r.get("stop_reason") not in ("finished", "single_call", "pipeline") for r in ok_rows)),
+        "sent_to_human_review": int(sum(r.get("decision") == "review" for r in ok_rows)),
     }
 
 

@@ -105,7 +105,8 @@ class CaseEnv:
             unsupported = ungrounded_values(crit["kind"], values, [self.doc_by_id[e]["text"] for e in evidence_ids])
             if unsupported:
                 return {"error": f"These values do not appear in the cited evidence {evidence_ids}: {unsupported}. "
-                                 "Copy values exactly from the chart chunks, or search for the right chunk first."}
+                                 "Copy values exactly from the chart chunks, or search for the right chunk first.",
+                        "cited_text": {e: self.doc_by_id[e]["text"] for e in evidence_ids}}
         res = evaluate(crit, values)
         if res["status"] in ("met", "unmet", "missing"):
             self.grounding[criterion_id].append({"status": res["status"], "evidence_ids": evidence_ids, "via": "rule"})
