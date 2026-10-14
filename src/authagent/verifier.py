@@ -76,7 +76,7 @@ class _HFVerifier:
         self.torch = torch
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.tok = AutoTokenizer.from_pretrained(model_dir)
-        self.model = AutoModelForSequenceClassification.from_pretrained(model_dir).to(self.device).eval()
+        self.model = AutoModelForSequenceClassification.from_pretrained(model_dir).float().to(self.device).eval()
         id2label = {int(k): v for k, v in self.model.config.id2label.items()}
         # Order the model's outputs as SUPPORTS, REFUTES, NOT_ENOUGH_INFO.
         self.order = [next(i for i, lab in id2label.items() if label_map.get(lab.lower(), lab) == target)
