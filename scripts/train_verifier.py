@@ -59,7 +59,10 @@ def main() -> None:
     tok = AutoTokenizer.from_pretrained(args.base)
     model = AutoModelForSequenceClassification.from_pretrained(
         args.base, num_labels=3, id2label=dict(enumerate(LABELS)), label2id={l: i for i, l in enumerate(LABELS)},
-        ignore_mismatched_sizes=True).to(device)
+        ignore_mismatched_sizes=True)
+    # The Hub checkpoint is stored in fp16, and recent transformers versions keep the checkpoint's
+    # dtype when loading. Training in pure fp16 with AdamW overflows to NaN, so train in fp32.
+    model = model.float().to(device)
 
     def batches(rows, shuffle):
         idx = list(range(len(rows)))
@@ -95,6 +98,8 @@ def main() -> None:
         total = 0.0
         for b in batches(data["train"], shuffle=True):
             loss = model(**b).loss
+            if not torch.isfinite(loss):
+                raise SystemExit("Training diverged (loss is NaN/inf). Try a lower --lr, e.g. --lr 1e-5.")
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
