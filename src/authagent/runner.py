@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import traceback
 
@@ -62,7 +63,8 @@ def run_config(config: str, llm, records: list[dict], retrieval_mode: str = "hyb
     out_path.parent.mkdir(parents=True, exist_ok=True)
     processed: set[str] = set()
     stop = None
-    with open(out_path, "w", encoding="utf-8") as f:
+    current = dict(previous)  # every row stays on disk at all times; finished cases overwrite theirs
+    if True:
         for i, rec in enumerate(records, 1):
             if stop:
                 break
@@ -111,21 +113,26 @@ def run_config(config: str, llm, records: list[dict], retrieval_mode: str = "hyb
                         indent=1, ensure_ascii=False), encoding="utf-8")
             if stop and row.get("error"):
                 break  # don't record the interrupted case; previous rows are kept below
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-            f.flush()
+            current[pid] = row
+            _save(out_path, current)  # atomic: a disconnect never loses earlier results
             processed.add(pid)
             rows.append(row)
             if verbose:
                 mark = "ERR" if row.get("error") else ("ok " if row.get("decision") == row["gold_decision"] else "XX ")
                 print(f"[{name}] {i:>3}/{len(records)} {pid} {mark} pred={row.get('decision')} "
                       f"gold={row['gold_decision']} llm_calls={row.get('llm_calls', 0)}", flush=True)
-        # Keep earlier results for patients not handled in this run (other subsets, interrupted runs).
-        for pid, r in previous.items():
-            if pid not in processed:
-                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        _save(out_path, current)
     if stop:
         print(f"[{name}] {stop}", flush=True)
     return rows
+
+
+def _save(path, rows_by_pid: dict) -> None:
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        for r in rows_by_pid.values():
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    os.replace(tmp, path)
 
 
 def _slug(model: str) -> str:
