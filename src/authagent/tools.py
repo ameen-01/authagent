@@ -92,7 +92,11 @@ class CaseEnv:
         res = evaluate(crit, values or {})
         if res["status"] in ("met", "unmet", "missing"):
             self.grounding[criterion_id].append({"status": res["status"], "evidence_ids": evidence_ids, "via": "rule"})
-        return {"criterion_id": criterion_id, **res}
+        out = {"criterion_id": criterion_id, **res}
+        if res["status"] in ("met", "unmet", "missing") and criterion_id not in self.decisions:
+            out["next"] = (f"record_decision for {criterion_id}: status {res['status']}, "
+                           f"evidence_ids {evidence_ids}")
+        return out
 
     def verify_evidence(self, criterion_id: str, evidence_id: str) -> dict:
         crit = self.criteria.get(criterion_id)
@@ -110,13 +114,19 @@ class CaseEnv:
         status = LABEL_TO_STATUS.get(res["label"])
         if status:
             self.grounding[criterion_id].append({"status": status, "evidence_ids": [evidence_id], "via": res["source"]})
-        return {"criterion_id": criterion_id, "evidence_id": evidence_id, "label": res["label"],
-                "confidence": res.get("confidence"), "source": res["source"]}
+        out = {"criterion_id": criterion_id, "evidence_id": evidence_id, "label": res["label"],
+               "confidence": res.get("confidence"), "source": res["source"]}
+        if status and criterion_id not in self.decisions:
+            out["next"] = f"record_decision for {criterion_id}: status {status}, evidence_ids ['{evidence_id}']"
+        return out
 
     def record_decision(self, criterion_id: str, status: str, evidence_ids: list[str] | None = None,
                         reason: str = "") -> dict:
         if criterion_id not in self.criteria:
             return {"error": f"Unknown criterion '{criterion_id}'."}
+        if criterion_id in self.decisions:
+            return {"error": f"{criterion_id} is already recorded as {self.decisions[criterion_id]['status']}. "
+                             f"Continue with: {self._remaining()}."}
         status = str(status).lower().strip()
         if status not in ("met", "unmet", "missing"):
             return {"error": "status must be met, unmet or missing."}
@@ -142,12 +152,30 @@ class CaseEnv:
         remaining = [c for c in self.criteria if c not in self.decisions]
         decided = {cid: f"{d['status']} ({', '.join(d['evidence_ids']) or 'no evidence'})"
                    for cid, d in self.decisions.items()}
-        return {"recorded": criterion_id, "status": status, "decided_so_far": decided, "remaining": remaining}
+        out = {"recorded": criterion_id, "status": status, "decided_so_far": decided, "remaining": remaining}
+        unrecorded = self._grounded_unrecorded()
+        if unrecorded:  # survives context compaction: results checked but not yet recorded
+            out["checked_not_recorded"] = unrecorded
+        out["next"] = (f"record_decision for {list(unrecorded)[0]}" if unrecorded
+                       else f"work on {remaining[0]}" if remaining else "finish")
+        return out
+
+    def _remaining(self) -> list[str]:
+        return [c for c in self.criteria if c not in self.decisions]
+
+    def _grounded_unrecorded(self) -> dict:
+        out = {}
+        for cid, g in self.grounding.items():
+            if cid not in self.decisions and g:
+                last = g[-1]
+                out[cid] = f"{last['status']} ({', '.join(last['evidence_ids']) or 'no evidence id'})"
+        return out
 
     def finish(self) -> dict:
         remaining = [c for c in self.criteria if c not in self.decisions]
         if remaining:
-            return {"error": f"Criteria without a decision: {remaining}. Decide them before finishing."}
+            return {"error": f"Criteria without a decision: {remaining}. Decide them before finishing.",
+                    "checked_not_recorded": self._grounded_unrecorded()}
         self.finished = True
         return {"done": True, **self.outcome()}
 

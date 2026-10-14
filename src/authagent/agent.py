@@ -35,7 +35,9 @@ Rules:
 {rule_rule}4. Look-alike text does not satisfy a criterion: another drug, a family member, an order or plan, a
    different condition. When unsure, call verify_evidence.
 5. If nothing relevant is found after rephrasing, record "missing". Do not guess.
-6. Keep each thought to one short sentence."""
+6. As soon as a check settles a criterion, record it with record_decision before moving on.
+   Observations may include "next": follow it unless you have a reason not to.
+7. Keep each thought to one short sentence."""
 
 RULE_TOOL = """- evaluate_rule {"criterion_id": str, "values": {...}, "evidence_ids": [ids]} -> deterministic check for
   criteria of kind age, diagnosis, lab, med_duration. values formats:
