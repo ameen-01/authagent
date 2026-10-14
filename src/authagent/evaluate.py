@@ -53,6 +53,10 @@ def case_metrics(rows: list[dict]) -> dict:
         "n": n,
         "errors": len(rows) - n,
         "decision_accuracy": float(np.mean(correct)),
+        # A wrong decision is a confident, silent error; "review" is an explicit hand-off to a human.
+        "wrong_decision_rate": float(np.mean([r["decision"] != r["gold_decision"] and r["decision"] != "review"
+                                              for r in ok_rows])),
+        "review_rate": float(np.mean([r["decision"] == "review" for r in ok_rows])),
         "false_approval_rate": (sum(r["decision"] == "approve" for r in not_approvable) / len(not_approvable)
                                 if not_approvable else None),
         "auto_approval_recall": (sum(r["decision"] == "approve" for r in approvable) / len(approvable)
@@ -134,9 +138,9 @@ def report(configs: list[str], reference: str = "agent") -> dict:
             runs[c] = read_jsonl(path)
     out = {"configs": {}, "mcnemar_vs_" + reference: {}}
     lines = ["# AuthAgent results", "",
-             "| Config | n | Decision acc. [95% CI] | False approvals [95% CI] | Criterion acc. | Hard criteria | "
+             "| Config | n | Decision acc. [95% CI] | Wrong decisions | Sent to review | False approvals [95% CI] | Criterion acc. | Hard criteria | "
              "Missing detected | Citation precision | LLM calls/case | Tokens/case | Checks sent to LLM |",
-             "|---|---|---|---|---|---|---|---|---|---|---|"]
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for c, rows in runs.items():
         m = case_metrics(rows)
         if not m.get("n"):
@@ -147,6 +151,7 @@ def report(configs: list[str], reference: str = "agent") -> dict:
         out["configs"][c] = m
         ci = lambda k: f" [{_fmt(m[k][0])}–{_fmt(m[k][1])}]" if m.get(k) else ""  # noqa: E731
         lines.append(f"| {c} | {m['n']} | {_fmt(m['decision_accuracy'])}{ci('decision_accuracy_ci')} | "
+                     f"{_fmt(m['wrong_decision_rate'])} | {_fmt(m['review_rate'])} | "
                      f"{_fmt(m['false_approval_rate'])}{ci('false_approval_rate_ci')} | {_fmt(m['criterion_accuracy'])} | "
                      f"{_fmt(m['hard_criterion_accuracy'])} | {_fmt(m['missing_detection_recall'])} | "
                      f"{_fmt(m['citation_precision'])} | {m['llm_calls_per_case']:.1f} | {m['tokens_per_case']:.0f} | "
