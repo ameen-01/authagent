@@ -30,6 +30,34 @@ from authagent.common import MODELS_DIR, PAIRS_DIR, RESULTS_DIR, VERIFIER_LABELS
 LABELS = list(VERIFIER_LABELS)
 
 
+NLI_TO_OURS = {"entailment": "SUPPORTS", "contradiction": "REFUTES", "neutral": "NOT_ENOUGH_INFO"}
+
+
+def load_base(auto_cls, base: str):
+    """Load the base model with a 3-way head in our label order.
+
+    If the base is already an NLI classifier (e.g. cross-encoder/nli-deberta-v3-small), keep its
+    trained head and reorder its rows entailment/contradiction/neutral -> SUPPORTS/REFUTES/NEI,
+    so fine-tuning starts from what it already knows instead of a random head (transfer learning).
+    """
+    import torch
+
+    model = auto_cls.from_pretrained(base)
+    id2label = {int(k): str(v).lower() for k, v in model.config.id2label.items()}
+    head = getattr(model, "classifier", None)
+    if model.config.num_labels == 3 and set(id2label.values()) == set(NLI_TO_OURS) and isinstance(head, torch.nn.Linear):
+        order = [next(i for i, lab in id2label.items() if NLI_TO_OURS[lab] == ours) for ours in LABELS]
+        with torch.no_grad():
+            head.weight.copy_(head.weight[order].clone())
+            head.bias.copy_(head.bias[order].clone())
+        print(f"Starting from an NLI head; rows reordered {order} -> {LABELS}")
+    else:
+        model = auto_cls.from_pretrained(base, num_labels=3, ignore_mismatched_sizes=True)
+    model.config.id2label = dict(enumerate(LABELS))
+    model.config.label2id = {lab: i for i, lab in enumerate(LABELS)}
+    return model
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="microsoft/deberta-v3-small")
@@ -57,9 +85,7 @@ def main() -> None:
     print({s: len(v) for s, v in data.items()})
 
     tok = AutoTokenizer.from_pretrained(args.base)
-    model = AutoModelForSequenceClassification.from_pretrained(
-        args.base, num_labels=3, id2label=dict(enumerate(LABELS)), label2id={l: i for i, l in enumerate(LABELS)},
-        ignore_mismatched_sizes=True)
+    model = load_base(AutoModelForSequenceClassification, args.base)
     # The Hub checkpoint is stored in fp16, and recent transformers versions keep the checkpoint's
     # dtype when loading. Training in pure fp16 with AdamW overflows to NaN, so train in fp32.
     model = model.float().to(device)
