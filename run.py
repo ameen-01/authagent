@@ -120,6 +120,16 @@ def _records(args):
     if args.patients:
         wanted = set(args.patients.split(","))
         recs = [r for r in recs if r["chart"]["patient_id"] in wanted]
+    if getattr(args, "per_policy", None):
+        # Balanced subset: the first N patients of each policy (same subset for every config and person).
+        seen: dict[str, int] = {}
+        keep = []
+        for r in recs:
+            pol = r["chart"]["policy_id"]
+            if seen.get(pol, 0) < args.per_policy:
+                keep.append(r)
+                seen[pol] = seen.get(pol, 0) + 1
+        recs = keep
     if args.limit:
         recs = recs[: args.limit]
     return recs
@@ -234,6 +244,7 @@ def main() -> int:
         p.add_argument("--policy", default=None, help="comma-separated policy ids")
         p.add_argument("--patients", default=None, help="comma-separated patient ids")
         p.add_argument("--limit", type=int, default=None)
+        p.add_argument("--per-policy", type=int, default=None, help="balanced subset: first N patients per policy")
 
     sub.add_parser("selftest").set_defaults(fn=cmd_selftest)
     p = sub.add_parser("generate")
