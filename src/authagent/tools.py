@@ -95,6 +95,13 @@ class CaseEnv:
             (only,) = values.values()
             if isinstance(only, dict):
                 values = only
+        if crit["kind"] in RULE_KINDS:
+            if not evidence_ids:
+                return {"error": "Pass evidence_ids: the chunk ids (from search_chart) you read these values from."}
+            unsupported = ungrounded_values(crit["kind"], values, [self.doc_by_id[e]["text"] for e in evidence_ids])
+            if unsupported:
+                return {"error": f"These values do not appear in the cited evidence {evidence_ids}: {unsupported}. "
+                                 "Copy values exactly from the chart chunks, or search for the right chunk first."}
         res = evaluate(crit, values)
         if res["status"] in ("met", "unmet", "missing"):
             self.grounding[criterion_id].append({"status": res["status"], "evidence_ids": evidence_ids, "via": "rule"})
@@ -192,6 +199,50 @@ class CaseEnv:
 
     def draft(self) -> str:
         return draft_output(self.policy, self.chart, self.decisions, self.doc_by_id)
+
+
+def ungrounded_values(kind: str, values: dict, texts: list[str]) -> list[str]:
+    """Values the model passed to a rule that cannot be found in the evidence it cited.
+
+    Stops the model from evaluating numbers it invented or copied from the prompt's examples.
+    """
+    import re
+
+    blob = " ".join(texts).lower()
+    numbers = {float(n) for n in re.findall(r"-?\d+(?:\.\d+)?", blob)}
+
+    def has_number(v) -> bool:
+        try:
+            return float(v) in numbers
+        except (TypeError, ValueError):
+            return False
+
+    def has_text(v) -> bool:
+        return v is not None and str(v).strip().lower() in blob
+
+    missing = []
+    try:
+        if kind == "age" and "age" in values and not has_number(values["age"]):
+            missing.append(f"age {values['age']}")
+        elif kind == "diagnosis" and "code" in values and not has_text(values["code"]):
+            missing.append(f"code {values['code']}")
+        elif kind == "lab":
+            ms = values.get("measurements") or ([{"value": values.get("value"), "date": values.get("date")}]
+                                                if "value" in values else [])
+            for m in ms:
+                v, d = m.get("value"), m.get("date")
+                if not (has_number(v) or has_text(v)):
+                    missing.append(f"value {v}")
+                if d and not has_text(str(d)[:10]):
+                    missing.append(f"date {d}")
+        elif kind == "med_duration":
+            for key in ("start", "end"):
+                d = values.get(key)
+                if d and not has_text(str(d)[:10]):
+                    missing.append(f"{key} {d}")
+    except AttributeError:
+        return []  # malformed values: the rule engine reports the error
+    return missing
 
 
 def _takes_phi(verifier) -> bool:
