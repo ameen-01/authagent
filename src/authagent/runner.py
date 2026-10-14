@@ -51,14 +51,21 @@ def run_config(config: str, llm, records: list[dict], retrieval_mode: str = "hyb
     out_path = RESULTS_DIR / "runs" / f"{name}.jsonl"
     trace_dir = RESULTS_DIR / "traces" / name
     trace_dir.mkdir(parents=True, exist_ok=True)
-    done = {}
-    if resume and out_path.exists():
-        done = {r["patient_id"]: r for r in read_jsonl(out_path) if not r.get("error")}
+    previous = {r["patient_id"]: r for r in read_jsonl(out_path)} if out_path.exists() else {}
+    models = {r.get("model") for r in previous.values()} - {None}
+    if models and models != {llm.name}:
+        raise SystemExit(f"{out_path.name} holds results from {sorted(models)}, not {llm.name}. "
+                         f"Use --tag (e.g. --tag _{_slug(llm.name)}) to keep each model's results separate.")
+    done = {pid: r for pid, r in previous.items() if not r.get("error")} if resume else {}
     verifier = build_verifier(spec["verifier"], llm, local_kind, tau)
     rows = []
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    processed: set[str] = set()
+    stop = None
     with open(out_path, "w", encoding="utf-8") as f:
         for i, rec in enumerate(records, 1):
+            if stop:
+                break
             chart, gold = rec["chart"], rec["gold"]
             pid = chart["patient_id"]
             if pid in done:
@@ -78,7 +85,11 @@ def run_config(config: str, llm, records: list[dict], retrieval_mode: str = "hyb
                     error = None
                 except Exception as exc:  # keep going; the row records the failure
                     res, error = None, f"{type(exc).__name__}: {exc}"
-                    traceback.print_exc()
+                    if _daily_limit(exc):
+                        stop = ("Daily token limit reached; stopping. Rerun the same command after the limit "
+                                "resets: finished cases are kept and this one is retried.")
+                    else:
+                        traceback.print_exc()
                 usage = _meter_diff(llm.meter.as_dict(), before)
                 row = {"patient_id": pid, "policy_id": chart["policy_id"], "config": name, "model": llm.name,
                        "retrieval": retrieval_mode, "verifier": getattr(verifier, "name", None),
@@ -98,11 +109,31 @@ def run_config(config: str, llm, records: list[dict], retrieval_mode: str = "hyb
                         {"patient_id": pid, "config": name, "decision": res["decision"], "gold_decision": gold["decision"],
                          "statuses": res["statuses"], "gold": row["gold"], "draft": res["draft"], "trace": res["trace"]},
                         indent=1, ensure_ascii=False), encoding="utf-8")
+            if stop and row.get("error"):
+                break  # don't record the interrupted case; previous rows are kept below
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
             f.flush()
+            processed.add(pid)
             rows.append(row)
             if verbose:
                 mark = "ERR" if row.get("error") else ("ok " if row.get("decision") == row["gold_decision"] else "XX ")
                 print(f"[{name}] {i:>3}/{len(records)} {pid} {mark} pred={row.get('decision')} "
                       f"gold={row['gold_decision']} llm_calls={row.get('llm_calls', 0)}", flush=True)
+        # Keep earlier results for patients not handled in this run (other subsets, interrupted runs).
+        for pid, r in previous.items():
+            if pid not in processed:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    if stop:
+        print(f"[{name}] {stop}", flush=True)
     return rows
+
+
+def _slug(model: str) -> str:
+    import re
+
+    return re.sub(r"[^a-z0-9]+", "", model.split("/")[-1].lower())[:16]
+
+
+def _daily_limit(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return ("per day" in msg or "(tpd)" in msg or "(rpd)" in msg) and ("rate" in msg or "429" in msg)

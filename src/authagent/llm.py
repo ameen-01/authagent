@@ -186,6 +186,11 @@ class LLMClient:
             out = self._api().chat.completions.create(**kwargs)
         except Exception as exc:
             msg = str(exc).lower()
+            salvaged = _salvage_failed_generation(exc) if "json_validate_failed" in msg else None
+            if salvaged:
+                # Groq rejected the reply (e.g. two JSON actions in one message) but returned it:
+                # keep the first action instead of paying for another call.
+                return self._store(key, purpose, salvaged, time.time() - t0)
             if self.json_mode and ("response_format" in msg or "json_validate_failed" in msg):
                 # Provider-side JSON validation failed (or is unsupported): ask again without it;
                 # parse_json() extracts the JSON object from a plain reply.
@@ -207,6 +212,11 @@ class LLMClient:
         if not text.strip():  # never cache an empty reply; the caller treats it as unparseable
             self.meter.add(purpose, r)
             return r
+        return self._store(key, purpose, text, latency, r)
+
+    def _store(self, key: str, purpose: str, text: str, latency: float, r: LLMResponse | None = None) -> LLMResponse:
+        self._last_call = time.time()
+        r = r or LLMResponse(text, False, 0, 0, latency)
         row = {"key": key, "model": self.model, "purpose": purpose, "text": text,
                "prompt_tokens": r.prompt_tokens, "completion_tokens": r.completion_tokens, "latency_s": round(latency, 3)}
         with self._lock:
@@ -216,6 +226,23 @@ class LLMClient:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
         self.meter.add(purpose, r)
         return r
+
+
+def _salvage_failed_generation(exc: Exception) -> str | None:
+    """Pull the first JSON object out of a provider's rejected generation, if it holds one."""
+    body = getattr(exc, "body", None)
+    gen = None
+    if isinstance(body, dict):
+        gen = (body.get("error") or body).get("failed_generation")
+    if not gen:
+        m = re.search(r"'failed_generation': '(.*)'}}?\s*$", str(exc), re.DOTALL)
+        gen = m.group(1) if m else None
+    if not gen:
+        return None
+    try:
+        return json.dumps(parse_json(gen))
+    except (ValueError, json.JSONDecodeError):
+        return None
 
 
 def get_llm(name: str | None = None):
