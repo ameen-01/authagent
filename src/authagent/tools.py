@@ -89,7 +89,13 @@ class CaseEnv:
         bad = [e for e in evidence_ids if e not in self.doc_by_id]
         if bad:
             return {"error": f"Unknown evidence ids {bad}. Cite ids returned by search_chart."}
-        res = evaluate(crit, values or {})
+        values = values or {}
+        # Models sometimes nest the values one level deep ({"lab": {...}}, {"values": {...}}): unwrap it.
+        if len(values) == 1:
+            (only,) = values.values()
+            if isinstance(only, dict):
+                values = only
+        res = evaluate(crit, values)
         if res["status"] in ("met", "unmet", "missing"):
             self.grounding[criterion_id].append({"status": res["status"], "evidence_ids": evidence_ids, "via": "rule"})
         out = {"criterion_id": criterion_id, **res}
