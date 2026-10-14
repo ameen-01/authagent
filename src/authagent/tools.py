@@ -60,6 +60,10 @@ class CaseEnv:
             return {"error": f"Unknown tool '{tool}'. Available: {self.tool_names()}"}
         if not isinstance(args, dict):
             return {"error": "args must be a JSON object."}
+        # Small models sometimes send null or a bare string where a list of ids is expected.
+        if "evidence_ids" in args:
+            ev = args["evidence_ids"]
+            args = {**args, "evidence_ids": [] if ev is None else [ev] if isinstance(ev, str) else ev}
         try:
             return fn(**args)
         except TypeError as exc:

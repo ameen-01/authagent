@@ -50,7 +50,7 @@ def run_single_prompt(chart: dict, policy: dict, llm, **_) -> dict:
         item = parsed.get(c["id"], {}) if isinstance(parsed, dict) else {}
         status = str(item.get("status", "missing")).lower()
         status = status if status in STATUSES else "missing"
-        ids = [e for e in item.get("evidence_ids", []) if e in env.doc_by_id] if isinstance(item, dict) else []
+        ids = [e for e in (item.get("evidence_ids") or []) if e in env.doc_by_id] if isinstance(item, dict) else []
         env.decisions[c["id"]] = {"status": status, "evidence_ids": ids, "reason": "single prompt"}
     statuses = {cid: d["status"] for cid, d in env.decisions.items()}
     return {"statuses": statuses, "decision": decide(statuses.values()), "decisions": env.decisions,
@@ -83,8 +83,10 @@ def run_fixed_pipeline(chart: dict, policy: dict, llm, verifier, retrieval_mode:
             try:
                 out = parse_json(r.text)
                 values = out.get("values")
-                ids = [e for e in out.get("evidence_ids", []) if e in env.doc_by_id]
-            except ValueError:
+                values = values if isinstance(values, dict) else None
+                raw_ids = out.get("evidence_ids") or []
+                ids = [e for e in (raw_ids if isinstance(raw_ids, list) else [raw_ids]) if e in env.doc_by_id]
+            except (ValueError, AttributeError):
                 values, ids = None, []
             if values:
                 res = env.evaluate_rule(cid, values, ids)
