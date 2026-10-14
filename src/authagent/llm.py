@@ -111,13 +111,15 @@ class LLMClient:
     """
 
     def __init__(self, model: str | None = None, base_url: str | None = None, api_key: str | None = None,
-                 temperature: float = 0.0, max_tokens: int = 600, cache_path: Path | None = None,
+                 temperature: float = 0.0, max_tokens: int | None = None, cache_path: Path | None = None,
                  offline: bool | None = None, json_mode: bool | None = None, min_interval_s: float | None = None):
-        self.model = model or os.environ.get("LLM_MODEL", "llama-3.3-70b-versatile")
+        self.model = model or os.environ.get("LLM_MODEL", "openai/gpt-oss-120b")
         self.base_url = base_url or os.environ.get("LLM_BASE_URL", "https://api.groq.com/openai/v1")
         self.api_key = api_key or os.environ.get("LLM_API_KEY", "")
         self.temperature = temperature
-        self.max_tokens = max_tokens
+        # Reasoning models (gpt-oss, qwen3) spend tokens thinking before they answer: leave room.
+        self.max_tokens = max_tokens or int(os.environ.get("LLM_MAX_TOKENS", "4000"))
+        self.reasoning_effort = os.environ.get("LLM_REASONING_EFFORT", "").strip()  # e.g. low (gpt-oss on Groq)
         self.offline = offline if offline is not None else os.environ.get("AUTHAGENT_OFFLINE") == "1"
         self.json_mode = json_mode if json_mode is not None else os.environ.get("LLM_JSON_MODE", "1") == "1"
         self.min_interval_s = min_interval_s if min_interval_s is not None else float(os.environ.get("LLM_MIN_INTERVAL_S", "0"))
@@ -142,6 +144,12 @@ class LLMClient:
         payload = json.dumps({"model": self.model, "messages": messages, "temperature": self.temperature,
                               "max_tokens": self.max_tokens, "json": self.json_mode}, sort_keys=True)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _empty(self, purpose: str, latency: float) -> LLMResponse:
+        self._last_call = time.time()
+        r = LLMResponse("", False, 0, 0, latency)
+        self.meter.add(purpose, r)
+        return r
 
     def _api(self):
         if self._client is None:
@@ -171,13 +179,23 @@ class LLMClient:
         kwargs = dict(model=self.model, messages=messages, temperature=self.temperature, max_tokens=self.max_tokens)
         if self.json_mode:
             kwargs["response_format"] = {"type": "json_object"}
+        if self.reasoning_effort:
+            kwargs["extra_body"] = {"reasoning_effort": self.reasoning_effort}
         t0 = time.time()
         try:
             out = self._api().chat.completions.create(**kwargs)
-        except Exception as exc:  # some providers/models reject response_format
-            if self.json_mode and "response_format" in str(exc).lower():
-                kwargs.pop("response_format")
-                out = self._api().chat.completions.create(**kwargs)
+        except Exception as exc:
+            msg = str(exc).lower()
+            if self.json_mode and ("response_format" in msg or "json_validate_failed" in msg):
+                # Provider-side JSON validation failed (or is unsupported): ask again without it;
+                # parse_json() extracts the JSON object from a plain reply.
+                kwargs.pop("response_format", None)
+                try:
+                    out = self._api().chat.completions.create(**kwargs)
+                except Exception:
+                    raise exc
+            elif "json_validate_failed" in msg:
+                return self._empty(purpose, time.time() - t0)
             else:
                 raise
         latency = time.time() - t0
@@ -186,6 +204,9 @@ class LLMClient:
         usage = getattr(out, "usage", None)
         r = LLMResponse(text, False, getattr(usage, "prompt_tokens", 0) or 0,
                         getattr(usage, "completion_tokens", 0) or 0, latency)
+        if not text.strip():  # never cache an empty reply; the caller treats it as unparseable
+            self.meter.add(purpose, r)
+            return r
         row = {"key": key, "model": self.model, "purpose": purpose, "text": text,
                "prompt_tokens": r.prompt_tokens, "completion_tokens": r.completion_tokens, "latency_s": round(latency, 3)}
         with self._lock:
