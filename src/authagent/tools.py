@@ -18,6 +18,8 @@ from .rules import evaluate
 
 RULE_KINDS = {"age", "diagnosis", "lab", "med_duration"}
 LABEL_TO_STATUS = {"SUPPORTS": "met", "REFUTES": "unmet"}
+MAX_SEARCHES = 6   # per criterion; then the agent must decide with what it found
+SEARCH_WARNING = 4
 
 
 class CaseEnv:
@@ -37,6 +39,8 @@ class CaseEnv:
         self.grounding: dict[str, list[dict]] = {cid: [] for cid in self.criteria}
         self.searches: dict[str, set[str]] = {cid: set() for cid in self.criteria}
         self.checked: set[tuple[str, str]] = set()  # (criterion_id, evidence_id) pairs examined by a tool
+        self.search_counts: dict[str, int] = {cid: 0 for cid in self.criteria}
+        self.retrieved: dict[str, set[str]] = {cid: set() for cid in self.criteria}  # chunk ids found per criterion
         self.verifier_calls = 0
         self.escalations = 0
         self.finished = False
@@ -81,10 +85,24 @@ class CaseEnv:
         return {"policy_id": self.policy["policy_id"], "title": self.policy["title"], "criteria": crit}
 
     def search_chart(self, query: str, criterion_id: str | None = None, k: int | None = None) -> dict:
-        if criterion_id in self.searches:
+        undecided = criterion_id in self.searches and criterion_id not in self.decisions
+        if undecided:
+            self.search_counts[criterion_id] += 1
+            n = self.search_counts[criterion_id]
+            if n > MAX_SEARCHES:
+                # Search budget per criterion: endless rephrasing burned whole step budgets (v2, P-017).
+                return {"error": f"Search limit for {criterion_id} reached ({MAX_SEARCHES} searches). Decide now: "
+                                 "evaluate_rule or verify_evidence on a chunk you already found, or "
+                                 f"record_decision {criterion_id} 'missing' with no evidence_ids."}
             self.searches[criterion_id].add(" ".join(query.lower().split()))
         hits = self.retriever.search(query, k=min(int(k or self.k), 8))
-        return {"query": query, "hits": hits or [], "note": None if hits else "No matching chart text."}
+        if criterion_id in self.retrieved:
+            self.retrieved[criterion_id].update(h["id"] for h in hits or [])
+        out = {"query": query, "hits": hits or [], "note": None if hits else "No matching chart text."}
+        if undecided and self.search_counts[criterion_id] >= SEARCH_WARNING:
+            out["warning"] = (f"Search {self.search_counts[criterion_id]} of {MAX_SEARCHES} for {criterion_id}. Stop "
+                              "rephrasing: check the best chunk above, or record 'missing' with no evidence_ids.")
+        return out
 
     def evaluate_rule(self, criterion_id: str, values: dict, evidence_ids: list[str] | None = None) -> dict:
         crit = self.criteria.get(criterion_id)
@@ -126,8 +144,17 @@ class CaseEnv:
         doc = self.doc_by_id.get(evidence_id)
         if doc is None:
             return {"error": f"Unknown evidence id '{evidence_id}'. Cite ids returned by search_chart."}
-        if self.use_rules and crit["kind"] in ("age", "lab", "med_duration") and doc["source"] == "structured":
-            return {"error": "Structured values are checked with evaluate_rule, not verify_evidence."}
+        if self.use_rules and crit["kind"] in ("age", "lab", "med_duration"):
+            # Numbers and dates are compared in code only, also when they sit in note text: the LLM judge
+            # got date arithmetic wrong (v2, P-036: a 203-day statin course judged as REFUTES).
+            return {"error": f"{criterion_id} is a {crit['kind']} criterion: read the values from this chunk and "
+                             "pass them to evaluate_rule. If it has no usable values, record 'missing' "
+                             "without citing it.", "cited_text": {evidence_id: doc["text"]}}
+        if evidence_id not in self.retrieved[criterion_id]:
+            # Evidence must come from a search for this criterion (v2, P-033: a statin-dates note found for
+            # C4 was judged against the adherence criterion C5 without ever searching for adherence).
+            return {"error": f"{evidence_id} was not returned by a search for {criterion_id}. Call search_chart "
+                             f"with criterion_id '{criterion_id}' first, then verify the chunks it returns."}
         res = self.verifier.predict(crit["text"], doc["text"], phi=self.phi) if _takes_phi(self.verifier) \
             else self.verifier.predict(crit["text"], doc["text"])
         self.verifier_calls += 1
@@ -256,6 +283,10 @@ def ungrounded_values(kind: str, values: dict, texts: list[str]) -> list[str]:
                 if d and not has_text(str(d)[:10]):
                     missing.append(f"date {d}")
         elif kind == "med_duration":
+            # The drug name must be in the cited text too: otherwise another drug's dates
+            # (e.g. hydroxychloroquine's) can be passed under the accepted drug's name.
+            if values.get("drug") and not has_text(values["drug"]):
+                missing.append(f"drug {values['drug']}")
             for key in ("start", "end"):
                 d = values.get(key)
                 if d and not has_text(str(d)[:10]):
