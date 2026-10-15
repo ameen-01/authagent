@@ -43,7 +43,7 @@ def evaluate(criterion: dict, values: dict, as_of: date = AS_OF) -> dict:
             return _med_duration(params, values, as_of)
         return _result("error", f"'{kind}' criteria are judged from text: use verify_evidence instead.")
     except (KeyError, TypeError, ValueError) as exc:
-        return _result("error", f"Bad values for a {kind} rule: {exc!r}. Expected: {EXPECTED[kind]}")
+        return _result("error", f"Bad values for a {kind} rule: {exc!r}. Expected: {FORMAT_HINT[kind]}")
 
 
 EXPECTED = {
@@ -51,6 +51,14 @@ EXPECTED = {
     "diagnosis": '{"code": "M06.9"}',
     "lab": '{"name": "HbA1c", "measurements": [{"value": 7.8, "date": "2026-08-12"}, ...]}',
     "med_duration": '{"drug": "metformin", "start": "2026-01-10", "end": "2026-05-02" or null if ongoing}',
+}
+
+
+FORMAT_HINT = {
+    "age": '{"age": <age from DEMO>}',
+    "diagnosis": '{"code": "<ICD-10 code>"}',
+    "lab": '{"name": "<test>", "measurements": [{"value": <value>, "date": "<YYYY-MM-DD>"}, ...]}',
+    "med_duration": '{"drug": "<drug>", "start": "<YYYY-MM-DD>", "end": "<YYYY-MM-DD>" or null}',
 }
 
 

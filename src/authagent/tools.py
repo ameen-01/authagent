@@ -36,6 +36,7 @@ class CaseEnv:
         self.decisions: dict[str, dict] = {}
         self.grounding: dict[str, list[dict]] = {cid: [] for cid in self.criteria}
         self.searches: dict[str, set[str]] = {cid: set() for cid in self.criteria}
+        self.checked: set[tuple[str, str]] = set()  # (criterion_id, evidence_id) pairs examined by a tool
         self.verifier_calls = 0
         self.escalations = 0
         self.finished = False
@@ -108,6 +109,8 @@ class CaseEnv:
                                  "Copy values exactly from the chart chunks, or search for the right chunk first.",
                         "cited_text": {e: self.doc_by_id[e]["text"] for e in evidence_ids}}
         res = evaluate(crit, values)
+        if res["status"] != "error":
+            self.checked.update((criterion_id, e) for e in evidence_ids)
         if res["status"] in ("met", "unmet", "missing"):
             self.grounding[criterion_id].append({"status": res["status"], "evidence_ids": evidence_ids, "via": "rule"})
         out = {"criterion_id": criterion_id, **res}
@@ -129,6 +132,7 @@ class CaseEnv:
             else self.verifier.predict(crit["text"], doc["text"])
         self.verifier_calls += 1
         self.escalations += int(bool(res.get("escalated")) or res.get("source") == "llm")
+        self.checked.add((criterion_id, evidence_id))
         status = LABEL_TO_STATUS.get(res["label"])
         if status:
             self.grounding[criterion_id].append({"status": status, "evidence_ids": [evidence_id], "via": res["source"]})
@@ -162,6 +166,17 @@ class CaseEnv:
             if not evidence_ids:
                 evidence_ids = ok[-1]["evidence_ids"]
         else:
+            # "missing" means no usable evidence. Citing evidence while calling it missing is only allowed
+            # for chunks a tool examined and found not to settle the criterion (e.g. NOT_ENOUGH_INFO, stale lab).
+            settled = [x for x in g if x["status"] in ("met", "unmet") and set(x["evidence_ids"]) & set(evidence_ids)]
+            if settled:
+                return {"error": f"Evidence {settled[-1]['evidence_ids']} was found to show '{settled[-1]['status']}' "
+                                 f"for {criterion_id}. Record that status instead of 'missing'."}
+            unchecked = [e for e in evidence_ids if (criterion_id, e) not in self.checked]
+            if unchecked:
+                return {"error": f"You cite {unchecked} but have not checked them for {criterion_id}. Use "
+                                 "verify_evidence (text) or evaluate_rule (values) on them first, then record "
+                                 "met/unmet if they settle it, or 'missing' if they do not."}
             rule_missing = any(x["status"] == "missing" for x in g)
             if not rule_missing and len(self.searches[criterion_id]) < 2:
                 return {"error": f"Before concluding 'missing' for {criterion_id}, search at least twice with "

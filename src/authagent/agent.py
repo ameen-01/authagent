@@ -41,10 +41,11 @@ Rules:
 
 RULE_TOOL = """- evaluate_rule {"criterion_id": str, "values": {...}, "evidence_ids": [ids]} -> deterministic check for
   criteria of kind age, diagnosis, lab, med_duration. values formats:
-    age:          {"age": 54}
-    diagnosis:    {"code": "M06.9"}
-    lab:          {"name": "HbA1c", "measurements": [{"value": 7.8, "date": "2026-08-12"}, ...]}
-    med_duration: {"drug": "metformin", "start": "2026-01-10", "end": "2026-05-02"}  (end null if ongoing)
+    age:          {"age": <age from DEMO>}
+    diagnosis:    {"code": "<ICD-10 code from the problem list>"}
+    lab:          {"name": "<test>", "measurements": [{"value": <value>, "date": "<YYYY-MM-DD>"}, ...]}
+    med_duration: {"drug": "<drug>", "start": "<YYYY-MM-DD>", "end": "<YYYY-MM-DD>" or null if ongoing}
+  Copy every value exactly from the chunks you cite; never use a value you have not read in the chart.
 """
 RULE_RULE = """3. Never compare numbers or dates yourself: read the values from the chart (structured rows or note
    text) and pass them to evaluate_rule. For labs, pass every result of that test you found; the rule
