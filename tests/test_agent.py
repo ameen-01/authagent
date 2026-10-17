@@ -221,7 +221,7 @@ def test_missing_cannot_cite_unchecked_or_refuting_evidence(patients):
     env.search_chart("intolerance of methotrexate", criterion_id="C4")
     note = next(d["id"] for d in env.docs if d["id"].startswith("N"))
     res = env.record_decision("C4", "missing", [note])
-    assert "have not checked" in res["error"]
+    assert "have not checked" in res["error"] and "evidence_ids []" in res["error"]
     env.grounding["C4"].append({"status": "unmet", "evidence_ids": [note], "via": "test"})
     env.checked.add(("C4", note))
     assert "Record that status" in env.record_decision("C4", "missing", [note])["error"]

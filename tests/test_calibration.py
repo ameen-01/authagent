@@ -41,3 +41,24 @@ def test_metrics_shape():
     logits, y = overconfident(300)
     m = metrics(softmax(logits), y)
     assert set(m) == {"n", "accuracy", "macro_f1", "ece"} and 0.7 < m["accuracy"] < 0.9
+
+
+def test_cascade_always_escalates_not_enough_info():
+    from authagent.verifier import Cascade
+
+    class Local:
+        name = "stub"
+
+        def __init__(self, label):
+            self.label = label
+
+        def predict(self, c, e):
+            return {"label": self.label, "confidence": 0.999, "source": "stub"}
+
+    class Judge:
+        def predict(self, c, e, phi=None):
+            return {"label": "SUPPORTS", "confidence": None, "source": "llm"}
+
+    assert Cascade(Local("NOT_ENOUGH_INFO"), Judge(), 0.95).predict("c", "e")["escalated"] is True
+    assert Cascade(Local("SUPPORTS"), Judge(), 0.95).predict("c", "e")["escalated"] is False
+    assert Cascade(Local("NOT_ENOUGH_INFO"), Judge(), 0.95, escalate_nei=False).predict("c", "e")["escalated"] is False
