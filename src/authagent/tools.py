@@ -201,9 +201,14 @@ class CaseEnv:
                                  f"for {criterion_id}. Record that status instead of 'missing'."}
             unchecked = [e for e in evidence_ids if (criterion_id, e) not in self.checked]
             if unchecked:
-                return {"error": f"You cite {unchecked} but have not checked them for {criterion_id}. Use "
-                                 "verify_evidence (text) or evaluate_rule (values) on them first, then record "
-                                 "met/unmet if they settle it, or 'missing' if they do not."}
+                # v3 fresh-set P-033: the model resent this exact call until it was stopped as stuck,
+                # so the message now spells out the two concrete ways forward.
+                n = len(self.searches[criterion_id])
+                hint = ("Search again in plain words (e.g. the condition or drug named in the criterion text, not only "
+                        "codes), verify the relevant chunks, then record what they show."
+                        if n < 2 else "If nothing you found settles it, record 'missing' with evidence_ids [].")
+                return {"error": f"You cite {unchecked} but have not checked them for {criterion_id}. Do not cite "
+                                 f"unchecked chunks. {hint}"}
             rule_missing = any(x["status"] == "missing" for x in g)
             if not rule_missing and len(self.searches[criterion_id]) < 2:
                 return {"error": f"Before concluding 'missing' for {criterion_id}, search at least twice with "

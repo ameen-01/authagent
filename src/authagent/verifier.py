@@ -123,8 +123,9 @@ class FineTunedVerifier(_HFVerifier):
 JUDGE_SYSTEM = """You are a careful clinical documentation reviewer for prior authorization.
 Given ONE criterion and ONE piece of chart text, decide whether the text, on its own:
 - SUPPORTS: shows the criterion is satisfied
-- REFUTES: shows the criterion is NOT satisfied
+- REFUTES: explicitly shows the criterion is NOT satisfied (e.g. it states the opposite, such as non-adherence or an excluded condition)
 - NOT_ENOUGH_INFO: is related but does not settle it (other drug, family member, a plan or order, a different condition, missing values)
+Text about a different topic, or facts that do not contradict the criterion, is NOT_ENOUGH_INFO, never REFUTES.
 Reply with JSON only: {"label": "SUPPORTS" | "REFUTES" | "NOT_ENOUGH_INFO", "rationale": "<one short sentence>"}"""
 
 
@@ -154,13 +155,17 @@ class LLMJudge:
 class Cascade:
     """Local verifier first; escalate to the LLM judge when confidence < tau."""
 
-    def __init__(self, local, judge: LLMJudge, tau: float):
-        self.local, self.judge, self.tau = local, judge, tau
+    def __init__(self, local, judge: LLMJudge, tau: float, escalate_nei: bool = True):
+        self.local, self.judge, self.tau, self.escalate_nei = local, judge, tau, escalate_nei
         self.name = f"cascade({local.name}->llm@{tau})"
 
     def predict(self, criterion: str, evidence: str, phi: dict | None = None) -> dict:
         res = self.local.predict(criterion, evidence)
-        if res["confidence"] >= self.tau:
+        # One-way escalation (v4): NOT_ENOUGH_INFO is the label that turns into a "missing" criterion and a
+        # needless pend, and on an unseen policy the small model gave it confidently to real support
+        # (note-only diagnoses). So it is never accepted locally; SUPPORTS/REFUTES still are above tau.
+        nei = self.escalate_nei and res["label"] == "NOT_ENOUGH_INFO"
+        if res["confidence"] >= self.tau and not nei:
             res["escalated"] = False
             return res
         out = self.judge.predict(criterion, evidence, phi=phi)
